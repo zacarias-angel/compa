@@ -1,6 +1,6 @@
 import os
 import json
-import secrets
+import hashlib
 from pathlib import Path
 from typing import List, Optional
 
@@ -22,16 +22,18 @@ COMPA_PASSWORD = os.environ.get("COMPA_PASSWORD", "")
 
 WA_URL = os.environ.get("WA_URL", "http://wa:3001")
 
-SESSION_TOKENS: set[str] = set()
-
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+
+
+def make_token() -> str:
+    return hashlib.sha256(f"compa:{COMPA_PASSWORD}".encode()).hexdigest()
 
 
 def require_auth(authorization: Optional[str] = Header(default=None)):
     if not COMPA_PASSWORD:
         return
     token = (authorization or "").removeprefix("Bearer ").strip()
-    if token not in SESSION_TOKENS:
+    if token != make_token():
         raise HTTPException(status_code=401, detail="No autorizado")
 
 
@@ -213,9 +215,7 @@ def login(req: LoginRequest):
         return {"ok": True, "token": ""}
     if req.password != COMPA_PASSWORD:
         raise HTTPException(status_code=401, detail="Contraseña incorrecta")
-    token = secrets.token_hex(32)
-    SESSION_TOKENS.add(token)
-    return {"ok": True, "token": token}
+    return {"ok": True, "token": make_token()}
 
 
 @app.get("/youtube/search")
