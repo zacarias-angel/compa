@@ -1,28 +1,28 @@
 services:
   back:
     build: ./back
-    container_name: ari-back
+    container_name: compa-back
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
     networks:
-      - ari
+      - compa
     restart: unless-stopped
 
   front:
     build: ./front
-    container_name: ari-front
+    container_name: compa-front
     environment:
       - BACKEND_HOST=back
     networks:
-      - ari
+      - compa
     ports:
-      - "80:80"
+      - "3000:80"
     depends_on:
       - back
     restart: unless-stopped
 
 networks:
-  ari:
+  compa:
     driver: bridge

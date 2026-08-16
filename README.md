@@ -52,6 +52,16 @@ npm run dev
 3. En las variables de entorno agregá `DEEPSEEK_API_KEY`
 4. Deploy
 
+El frontend queda expuesto en el puerto **3000** del host (no 80, porque Traefik lo usa).
+
+### Exponer con Cloudflare Tunnel
+
+Como el VPS tiene IP compartida, usá un túnel para acceder desde afuera:
+
+- Subdominio: `compa.angelzacarias.uk`
+- Type: `HTTP`
+- URL: `localhost:3000`
+
 ### Opción B — Dos aplicaciones separadas
 
 1. **Back**: `Application` → Dockerfile en `back/` → variable `DEEPSEEK_API_KEY`
