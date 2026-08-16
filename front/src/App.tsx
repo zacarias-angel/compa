@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, LogOut, Send, X } from 'lucide-react'
+import { Bot, LogOut, Maximize, Minimize, Send, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
 import { getToken, login, resolveYoutube, sendChat, setToken } from './api'
 import { findContact } from './contacts'
@@ -49,11 +49,28 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState<Pending | null>(null)
+  const [kiosk, setKiosk] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, authed])
+
+  useEffect(() => {
+    let lock: any = null
+    if (kiosk) {
+      document.documentElement.requestFullscreen?.().catch(() => {})
+      ;(navigator as any).wakeLock
+        ?.request('screen')
+        .then((l: any) => {
+          lock = l
+        })
+        .catch(() => {})
+    }
+    return () => {
+      lock?.release?.()
+    }
+  }, [kiosk])
 
   async function handleLogin() {
     setLoginError(false)
@@ -140,11 +157,18 @@ export default function App() {
           <div className="text-xs text-emerald-400">en línea</div>
         </div>
         <button
+          onClick={() => setKiosk((k) => !k)}
+          className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+          aria-label="Kiosko"
+        >
+          {kiosk ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+        </button>
+        <button
           onClick={() => {
             setToken('')
             setAuthed(false)
           }}
-          className="ml-auto rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+          className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
           aria-label="Salir"
         >
           <LogOut className="h-5 w-5" />

@@ -86,10 +86,16 @@ Reemplazá `+549XXXXXXXXXX` por el número real (con código de país).
 
 ## Acciones soportadas (Fase 1)
 
-- **YouTube**: abre la app/browser con la búsqueda
+- **YouTube**: abre el video directo (con `yt-dlp`)
 - **WhatsApp**: envía mensaje (con confirmación)
 - **Email**: abre Gmail con mailto
+- **Clima**: usa Open-Meteo (gratis)
+- **Búsqueda web**: usa DuckDuckGo (gratis)
 - **Luz / Música**: devuelve orden (ESP32 en fase 3)
+
+## Modo kiosko
+
+En el header hay un botón de maximizar que pone la app en pantalla completa y mantiene la pantalla encendida (wake lock). Ideal para el celular siempre conectado.
 
 ## Fases futuras
 

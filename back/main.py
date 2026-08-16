@@ -4,6 +4,7 @@ import secrets
 from pathlib import Path
 from typing import List, Optional
 
+import requests
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -31,9 +32,16 @@ def require_auth(authorization: Optional[str] = Header(default=None)):
     if token not in SESSION_TOKENS:
         raise HTTPException(status_code=401, detail="No autorizado")
 
+
 SYSTEM_PROMPT = """Sos "Compa", un asistente personal de voz que vive en un celular kiosko. La palabra para activarte es "eh compa". Respondé siempre en español rioplatense, breve y natural.
 
-Tu tarea es interpretar lo que pide el usuario y devolver SIEMPRE un JSON válido con esta estructura:
+Tenés acceso a herramientas para obtener información actual de internet:
+- get_weather: clima actual de una ciudad
+- search_web: buscar información actual (noticias, estado de servicios, datos de hoy, cotizaciones, etc.)
+
+Usá esas herramientas cuando el usuario pregunte algo que necesite datos actuales de internet (clima, noticias, cotizaciones, estado de trenes/servicios, etc.). Para preguntas de conocimiento general que ya sabés, respondé directo.
+
+Además, interpretá acciones que pide el usuario. Devolvé SIEMPRE (como respuesta final, sin tool calls) un JSON válido con esta estructura:
 
 {
   "texto": "lo que decís al usuario en voz alta (corto, natural)",
@@ -46,20 +54,51 @@ Tu tarea es interpretar lo que pide el usuario y devolver SIEMPRE un JSON válid
 
 Reglas de acciones:
 - youtube: buscar/reproducir en YouTube. parametros: {"busqueda": "texto a buscar"}
-  * Si el usuario pide una canción por una frase de la letra o no sabe el nombre, usá esa frase EXACTAMENTE como "busqueda" (no intentes adivinar el título ni aclarar que no la conocés).
+  * Si el usuario pide una canción por una frase de la letra o no sabe el nombre, usá esa frase EXACTAMENTE como "busqueda".
 - whatsapp: enviar mensaje. parametros: {"contacto": "nombre", "mensaje": "texto"}
 - email: enviar correo. parametros: {"destinatario": "email", "asunto": "texto", "cuerpo": "texto"}
 - luz_on / luz_off: prender/apagar la luz. parametros: {}
 - musica_on / musica_off: prender/apagar el equipo de música. parametros: {}
 
 Reglas de confirmación:
-- youtube: no requiere confirmación (es inofensivo).
-- whatsapp y email: requieren confirmación (requiere_confirmacion: true). Si el mensaje o destinatario no están completos, preguntá lo que falte y no pongas acción.
-- luz y musica: no requieren confirmación, pero si no sabés qué hacer, preguntá.
+- youtube: no requiere confirmación.
+- whatsapp y email: requieren confirmación (requiere_confirmacion: true). Si faltan datos, preguntá lo que falta y no pongas acción.
+- luz y musica: no requieren confirmación.
 
 Si el usuario charla o pregunta algo sin acción, poné "accion": null y respondé normalmente.
 
 Devolvé SOLO el JSON, sin texto alrededor."""
+
+TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Obtener el clima actual de una ciudad",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "ciudad": {"type": "string", "description": "Nombre de la ciudad"}
+                },
+                "required": ["ciudad"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_web",
+            "description": "Buscar información actual en internet para responder preguntas",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "consulta": {"type": "string", "description": "La consulta a buscar"}
+                },
+                "required": ["consulta"],
+            },
+        },
+    },
+]
 
 app = FastAPI(title="Agente Compa")
 
@@ -82,6 +121,78 @@ class ChatRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     password: str
+
+
+def get_weather(ciudad: str) -> str:
+    try:
+        geo = requests.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": ciudad, "count": 1, "language": "es"},
+            timeout=10,
+        ).json()
+        results = geo.get("results") or []
+        if not results:
+            return f"No encontré la ciudad '{ciudad}'."
+        r = results[0]
+        name = r.get("name", ciudad)
+        lat, lon = r.get("latitude"), r.get("longitude")
+
+        w = requests.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,apparent_temperature,relative_humidity_2m,weather_code,wind_speed_10m",
+                "timezone": "auto",
+            },
+            timeout=10,
+        ).json()
+        cur = w.get("current") or {}
+        code = cur.get("weather_code", 0)
+        desc = {
+            0: "despejado", 1: "mayormente despejado", 2: "parcialmente nublado",
+            3: "nublado", 45: "neblina", 48: "neblina con escarcha",
+            51: "llovizna leve", 61: "lluvia leve", 63: "lluvia", 65: "lluvia intensa",
+            80: "chaparrones", 95: "tormenta",
+        }.get(code, "condición variable")
+        return (
+            f"En {name} hay {cur.get('temperature_2m')}°C (sensación "
+            f"{cur.get('apparent_temperature')}°C), {desc}. "
+            f"Humedad {cur.get('relative_humidity_2m')}%, viento {cur.get('wind_speed_10m')} km/h."
+        )
+    except Exception:
+        return "No pude obtener el clima en este momento."
+
+
+def search_web(consulta: str) -> str:
+    try:
+        r = requests.get(
+            "https://api.duckduckgo.com/",
+            params={"q": consulta, "format": "json", "no_html": 1, "skip_disambig": 1},
+            timeout=10,
+            headers={"User-Agent": "compa-agent/1.0"},
+        ).json()
+        pieces = []
+        if r.get("AbstractText"):
+            pieces.append(r["AbstractText"])
+        if r.get("Answer"):
+            pieces.append(r["Answer"])
+        for t in (r.get("RelatedTopics") or [])[:3]:
+            if isinstance(t, dict) and t.get("Text"):
+                pieces.append(t["Text"])
+        if not pieces:
+            return f"No encontré resultados claros para '{consulta}'."
+        return " ".join(pieces)[:1500]
+    except Exception:
+        return f"No pude buscar '{consulta}' en este momento."
+
+
+def run_tool(name: str, args: dict) -> str:
+    if name == "get_weather":
+        return get_weather(args.get("ciudad", ""))
+    if name == "search_web":
+        return search_web(args.get("consulta", ""))
+    return ""
 
 
 @app.get("/health")
@@ -138,14 +249,46 @@ def chat(req: ChatRequest, _: None = Depends(require_auth)):
     for m in req.messages:
         msgs.append({"role": m.role, "content": m.content})
 
-    resp = client.chat.completions.create(
-        model=DEEPSEEK_MODEL,
-        messages=msgs,
-        temperature=0.4,
-        response_format={"type": "json_object"},
-    )
+    raw = None
+    for _ in range(4):
+        resp = client.chat.completions.create(
+            model=DEEPSEEK_MODEL,
+            messages=msgs,
+            temperature=0.4,
+            tools=TOOLS,
+        )
+        msg = resp.choices[0].message
+        if msg.tool_calls:
+            msgs.append(
+                {
+                    "role": "assistant",
+                    "content": msg.content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                }
+            )
+            for tc in msg.tool_calls:
+                args = json.loads(tc.function.arguments or "{}")
+                result = run_tool(tc.function.name, args)
+                msgs.append(
+                    {"role": "tool", "tool_call_id": tc.id, "content": result}
+                )
+            continue
+        raw = msg.content
+        break
 
-    raw = resp.choices[0].message.content or "{}"
+    if raw is None:
+        raw = "{}"
+
     try:
         parsed = json.loads(raw)
     except json.JSONDecodeError:
