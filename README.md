@@ -7,13 +7,16 @@ Asistente de voz/texto que corre en un VPS (Coolify + Docker) y se usa desde un 
 ```
 agente/
 ├── back/                 # Backend FastAPI + cerebro DeepSeek
-│   ├── main.py           # API /chat y /health
+│   ├── main.py           # API /chat, /wa/send, /health
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── front/                # Frontend React/Vite (kiosko chat)
 │   ├── src/
 │   └── Dockerfile
-├── docker-compose.yml    # Levanta back + front juntos
+├── wa/                   # Servicio WhatsApp (baileys)
+│   ├── index.js          # API /send, /status, /qr
+│   └── Dockerfile
+├── docker-compose.yml    # Levanta back + front + wa juntos
 └── .env.example
 ```
 
@@ -72,22 +75,26 @@ Como el VPS tiene IP compartida, usá un túnel para acceder desde afuera:
 
 Si los desplegás separados, editá `front/nginx.conf` y cambiá `http://back:8000` por la IP/hostname interno del backend en Coolify.
 
-## Contactos (WhatsApp)
+## WhatsApp
 
-Los contactos se mapean en `front/src/contacts.ts`:
+El envío se hace en segundo plano desde el VPS con un servicio propio (baileys). Usa los contactos del teléfono vinculado, no una lista manual.
 
-```ts
-export const contacts: Record<string, string> = {
-  amor: '+549XXXXXXXXXX',
-}
-```
+### Vincular el número (una sola vez)
 
-Reemplazá `+549XXXXXXXXXX` por el número real (con código de país).
+1. Desplegá el stack
+2. En el kiosko, tocá el botón **WA!** del header (aparece ámbar si no está conectado)
+3. Escaneá el QR con WhatsApp del celular (Ajustes → Dispositivos vinculados → Vincular dispositivo)
+4. Listo. La sesión queda guardada en el volumen `wa-data`
+
+### Enviar mensajes
+
+- "mandale un mensaje a angel" → Compa busca "angel" en los contactos de WhatsApp y envía en segundo plano
+- Requiere confirmación antes de enviar
 
 ## Acciones soportadas (Fase 1)
 
 - **YouTube**: abre el video directo (con `yt-dlp`)
-- **WhatsApp**: envía mensaje (con confirmación)
+- **WhatsApp**: envía mensaje en segundo plano (con confirmación)
 - **Email**: abre Gmail con mailto
 - **Clima**: usa Open-Meteo (gratis)
 - **Búsqueda web**: usa DuckDuckGo (gratis)

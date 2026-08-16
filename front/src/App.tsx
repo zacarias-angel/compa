@@ -1,15 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, LogOut, Maximize, Minimize, Send, X } from 'lucide-react'
+import { Bot, LogOut, Maximize, Minimize, MessageCircle, Send, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
-import { getToken, login, resolveYoutube, sendChat, setToken } from './api'
-import { findContact } from './contacts'
+import { getToken, getWaQr, getWaStatus, login, resolveYoutube, sendChat, sendWhatsApp, setToken } from './api'
 
 interface Pending {
   texto: string
   accion: Action
 }
 
-async function executeAction(accion: Action) {
+async function executeAction(accion: Action): Promise<string | null> {
   const p = accion.parametros
   switch (accion.tipo) {
     case 'youtube': {
@@ -18,26 +17,23 @@ async function executeAction(accion: Action) {
         url ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(p.busqueda || '')}`,
         '_self',
       )
-      break
+      return null
     }
     case 'whatsapp': {
-      const num = findContact(p.contacto || '').replace(/\D/g, '')
-      const msg = encodeURIComponent(p.mensaje || '')
-      if (num) {
-        window.open(`https://wa.me/${num}?text=${msg}`, '_self')
-      } else {
-        window.open(`https://wa.me/?text=${msg}`, '_self')
+      const res = await sendWhatsApp(p.contacto || '', p.mensaje || '')
+      if (res.ok) {
+        return `Mensaje enviado a ${p.contacto}.`
       }
-      break
+      return `No pude enviar el mensaje: ${res.error || 'error desconocido'}`
     }
     case 'email':
       window.open(
         `mailto:${p.destinatario || ''}?subject=${encodeURIComponent(p.asunto || '')}&body=${encodeURIComponent(p.cuerpo || '')}`,
         '_self',
       )
-      break
+      return null
     default:
-      break
+      return null
   }
 }
 
@@ -50,11 +46,37 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState<Pending | null>(null)
   const [kiosk, setKiosk] = useState(false)
+  const [waConnected, setWaConnected] = useState(true)
+  const [waQr, setWaQr] = useState<string | null>(null)
+  const [showQr, setShowQr] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, authed])
+
+  useEffect(() => {
+    if (!authed) return
+    let cancelled = false
+    async function poll() {
+      const status = await getWaStatus()
+      if (cancelled) return
+      setWaConnected(status.connected)
+      if (!status.connected) {
+        const qr = await getWaQr()
+        if (!cancelled) setWaQr(qr.qr)
+      } else {
+        setWaQr(null)
+        setShowQr(false)
+      }
+    }
+    poll()
+    const id = setInterval(poll, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [authed])
 
   useEffect(() => {
     let lock: any = null
@@ -82,6 +104,13 @@ export default function App() {
     }
   }
 
+  async function runAction(accion: Action) {
+    const result = await executeAction(accion)
+    if (result) {
+      setMessages((prev) => [...prev, { role: 'assistant', content: result }])
+    }
+  }
+
   async function handleSend(text?: string) {
     const content = (text ?? input).trim()
     if (!content || loading) return
@@ -98,7 +127,7 @@ export default function App() {
         if (res.requiere_confirmacion) {
           setPending({ texto: res.texto, accion: res.accion })
         } else {
-          await executeAction(res.accion)
+          await runAction(res.accion)
         }
       }
     } catch (e) {
@@ -114,7 +143,9 @@ export default function App() {
   }
 
   function confirmPending() {
-    if (pending) executeAction(pending.accion)
+    if (pending) {
+      runAction(pending.accion)
+    }
     setPending(null)
   }
 
@@ -156,6 +187,16 @@ export default function App() {
           <div className="font-semibold leading-tight text-white">Compa</div>
           <div className="text-xs text-emerald-400">en línea</div>
         </div>
+        <button
+          onClick={() => setShowQr(true)}
+          className="ml-auto flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition hover:bg-white/10"
+          aria-label="Estado WhatsApp"
+        >
+          <span className={`h-2 w-2 rounded-full ${waConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+          <span className={waConnected ? 'text-emerald-400' : 'text-amber-400'}>
+            {waConnected ? 'WA' : 'WA!'}
+          </span>
+        </button>
         <button
           onClick={() => setKiosk((k) => !k)}
           className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
@@ -246,6 +287,42 @@ export default function App() {
                 className="flex-1 rounded-xl bg-sky-600 py-3 text-[15px] font-medium hover:bg-sky-500"
               >
                 Enviar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showQr && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70 px-6">
+          <div className="w-full max-w-sm rounded-2xl bg-zinc-900 p-5 text-white shadow-xl">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-lg font-semibold">Vincular WhatsApp</span>
+              <button onClick={() => setShowQr(false)} aria-label="Cerrar">
+                <X className="h-6 w-6 text-white/60" />
+              </button>
+            </div>
+            {waConnected ? (
+              <p className="text-[15px] text-emerald-400">WhatsApp conectado.</p>
+            ) : waQr ? (
+              <>
+                <p className="mb-3 text-sm text-white/70">
+                  Abrí WhatsApp en tu celular → Ajustes → Dispositivos vinculados → Vincular un
+                  dispositivo, y escaneá este código.
+                </p>
+                <img src={waQr} alt="QR WhatsApp" className="mx-auto w-full max-w-[260px] rounded-xl bg-white p-2" />
+              </>
+            ) : (
+              <p className="text-[15px] text-white/70">
+                Generando código... esperá unos segundos. Si no aparece, el servicio de WhatsApp
+                todavía está arrancando.
+              </p>
+            )}
+            <div className="mt-5">
+              <button
+                onClick={() => setShowQr(false)}
+                className="w-full rounded-xl bg-white/10 py-3 text-[15px] font-medium hover:bg-white/20"
+              >
+                Cerrar
               </button>
             </div>
           </div>

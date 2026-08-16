@@ -52,3 +52,25 @@ export async function resolveYoutube(query: string): Promise<string | null> {
   const data = await res.json()
   return data.url ?? null
 }
+
+export async function sendWhatsApp(contacto: string, mensaje: string): Promise<{ ok: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/api/wa/send`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ contacto, mensaje }),
+  })
+  const data = await res.json()
+  return { ok: data.ok ?? false, error: data.error }
+}
+
+export async function getWaStatus(): Promise<{ connected: boolean; contactCount?: number }> {
+  const res = await fetch(`${API_URL}/api/wa/status`, { headers: headers() })
+  if (!res.ok) return { connected: false }
+  return res.json()
+}
+
+export async function getWaQr(): Promise<{ connected: boolean; qr: string | null }> {
+  const res = await fetch(`${API_URL}/api/wa/qr`, { headers: headers() })
+  if (!res.ok) return { connected: false, qr: null }
+  return res.json()
+}

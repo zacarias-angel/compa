@@ -20,6 +20,8 @@ DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
 COMPA_PASSWORD = os.environ.get("COMPA_PASSWORD", "")
 
+WA_URL = os.environ.get("WA_URL", "http://wa:3001")
+
 SESSION_TOKENS: set[str] = set()
 
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
@@ -121,6 +123,11 @@ class ChatRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     password: str
+
+
+class WASendRequest(BaseModel):
+    contacto: str
+    mensaje: str
 
 
 def get_weather(ciudad: str) -> str:
@@ -234,6 +241,38 @@ def youtube_search(q: str, _: None = Depends(require_auth)):
     except Exception:
         pass
     return {"url": None, "title": ""}
+
+
+@app.post("/wa/send")
+def wa_send(req: WASendRequest, _: None = Depends(require_auth)):
+    try:
+        r = requests.post(
+            f"{WA_URL}/send",
+            json={"contacto": req.contacto, "mensaje": req.mensaje},
+            timeout=30,
+        )
+        data = r.json()
+        return {"ok": data.get("ok", False), "error": data.get("error", "")}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/wa/status")
+def wa_status(_: None = Depends(require_auth)):
+    try:
+        r = requests.get(f"{WA_URL}/status", timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"connected": False, "error": str(e)}
+
+
+@app.get("/wa/qr")
+def wa_qr(_: None = Depends(require_auth)):
+    try:
+        r = requests.get(f"{WA_URL}/qr", timeout=5)
+        return r.json()
+    except Exception as e:
+        return {"connected": False, "qr": None, "error": str(e)}
 
 
 @app.post("/chat")
