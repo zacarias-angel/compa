@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, Send, X } from 'lucide-react'
+import { Bot, LogOut, Send, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
-import { resolveYoutube, sendChat } from './api'
-import { contacts } from './contacts'
+import { getToken, login, resolveYoutube, sendChat, setToken } from './api'
+import { findContact } from './contacts'
 
 interface Pending {
   texto: string
@@ -21,7 +21,7 @@ async function executeAction(accion: Action) {
       break
     }
     case 'whatsapp': {
-      const num = (contacts[p.contacto?.toLowerCase() || ''] || '').replace(/\D/g, '')
+      const num = findContact(p.contacto || '').replace(/\D/g, '')
       const msg = encodeURIComponent(p.mensaje || '')
       if (num) {
         window.open(`https://wa.me/${num}?text=${msg}`, '_self')
@@ -42,6 +42,9 @@ async function executeAction(accion: Action) {
 }
 
 export default function App() {
+  const [authed, setAuthed] = useState(() => !!getToken())
+  const [password, setPassword] = useState('')
+  const [loginError, setLoginError] = useState(false)
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
@@ -50,7 +53,17 @@ export default function App() {
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages, loading])
+  }, [messages, loading, authed])
+
+  async function handleLogin() {
+    setLoginError(false)
+    const ok = await login(password)
+    if (ok) {
+      setAuthed(true)
+    } else {
+      setLoginError(true)
+    }
+  }
 
   async function handleSend(text?: string) {
     const content = (text ?? input).trim()
@@ -63,46 +76,96 @@ export default function App() {
       const res: ChatResponse = await sendChat(next)
       const assistant: ChatMessage = { role: 'assistant', content: res.texto }
       setMessages((prev) => [...prev, assistant])
-      if (res.accion && res.accion.tipo !== 'luz_on' && res.accion.tipo !== 'luz_off' && res.accion.tipo !== 'musica_on' && res.accion.tipo !== 'musica_off') {
+      const skip = ['luz_on', 'luz_off', 'musica_on', 'musica_off']
+      if (res.accion && !skip.includes(res.accion.tipo)) {
         if (res.requiere_confirmacion) {
           setPending({ texto: res.texto, accion: res.accion })
         } else {
           await executeAction(res.accion)
         }
       }
-    } catch {
-      setMessages((prev) => [...prev, { role: 'assistant', content: 'Hubo un error. Verificá que el backend esté corriendo.' }])
+    } catch (e) {
+      if (e instanceof Error && e.message === 'unauthorized') {
+        setToken('')
+        setAuthed(false)
+      } else {
+        setMessages((prev) => [...prev, { role: 'assistant', content: 'Hubo un error. Verificá que el backend esté corriendo.' }])
+      }
     } finally {
       setLoading(false)
     }
   }
 
   function confirmPending() {
-    if (pending) {
-      executeAction(pending.accion)
-    }
+    if (pending) executeAction(pending.accion)
     setPending(null)
   }
 
+  if (!authed) {
+    return (
+      <div className="flex h-full items-center justify-center bg-[#0b0f1a] px-6">
+        <div className="w-full max-w-xs">
+          <div className="mb-6 flex flex-col items-center gap-3">
+            <Bot className="h-12 w-12 text-sky-400" />
+            <h1 className="text-xl font-bold text-white">Compa</h1>
+          </div>
+          <input
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            placeholder="Contraseña"
+            className="w-full rounded-xl bg-white/10 px-4 py-3 text-white outline-none placeholder:text-white/40"
+          />
+          {loginError && <p className="mt-2 text-sm text-red-400">Contraseña incorrecta</p>}
+          <button
+            onClick={handleLogin}
+            className="mt-4 w-full rounded-xl bg-sky-600 py-3 font-semibold text-white transition hover:bg-sky-500"
+          >
+            Entrar
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="flex items-center gap-2 border-b border-white/10 px-4 py-3">
-        <Bot className="h-5 w-5 text-sky-400" />
-        <span className="font-semibold text-white">Compa</span>
-        <span className="ml-auto text-xs text-white/40">kiosko</span>
+    <div className="flex h-full flex-col bg-[#0b0f1a]">
+      <header className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
+        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-sky-600">
+          <Bot className="h-5 w-5 text-white" />
+        </div>
+        <div>
+          <div className="font-semibold leading-tight text-white">Compa</div>
+          <div className="text-xs text-emerald-400">en línea</div>
+        </div>
+        <button
+          onClick={() => {
+            setToken('')
+            setAuthed(false)
+          }}
+          className="ml-auto rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+          aria-label="Salir"
+        >
+          <LogOut className="h-5 w-5" />
+        </button>
       </header>
 
       <main className="flex-1 space-y-3 overflow-y-auto px-4 py-4">
         {messages.length === 0 && (
-          <div className="mt-10 text-center text-sm text-white/40">
-            Decime qué querés hacer. Por ejemplo: &quot;reproducí x en youtube&quot; o
-            &quot;mandale un mensaje a amor&quot;.
+          <div className="mt-16 text-center">
+            <Bot className="mx-auto mb-4 h-12 w-12 text-white/20" />
+            <p className="text-base text-white/50">
+              Decime &quot;eh compa, reproducí una canción&quot; o
+              <br />
+              &quot;mandale un mensaje a angel&quot;.
+            </p>
           </div>
         )}
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
+              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-4 py-2.5 text-[15px] leading-relaxed ${
                 m.role === 'user' ? 'bg-sky-600 text-white' : 'bg-white/10 text-white'
               }`}
             >
@@ -112,7 +175,9 @@ export default function App() {
         ))}
         {loading && (
           <div className="flex justify-start">
-            <div className="rounded-2xl bg-white/10 px-3 py-2 text-sm text-white/60">...</div>
+            <div className="rounded-2xl bg-white/10 px-4 py-2.5 text-[15px] text-white/60">
+              <span className="inline-block animate-pulse">Escribiendo...</span>
+            </div>
           </div>
         )}
         <div ref={bottomRef} />
@@ -124,37 +189,37 @@ export default function App() {
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
           placeholder="Escribí acá..."
-          className="flex-1 rounded-full bg-white/10 px-4 py-2 text-sm text-white outline-none placeholder:text-white/40"
+          className="flex-1 rounded-full bg-white/10 px-4 py-3 text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button
           onClick={() => handleSend()}
-          className="rounded-full bg-sky-600 p-2 text-white transition hover:bg-sky-500"
+          className="rounded-full bg-sky-600 p-3 text-white transition hover:bg-sky-500"
           aria-label="Enviar"
         >
-          <Send className="h-4 w-4" />
+          <Send className="h-5 w-5" />
         </button>
       </footer>
 
       {pending && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/60 px-4">
+        <div className="fixed inset-0 flex items-center justify-center bg-black/70 px-6">
           <div className="w-full max-w-sm rounded-2xl bg-zinc-900 p-5 text-white shadow-xl">
             <div className="mb-3 flex items-center justify-between">
-              <span className="font-semibold">Confirmar</span>
+              <span className="text-lg font-semibold">Confirmar</span>
               <button onClick={() => setPending(null)} aria-label="Cerrar">
-                <X className="h-5 w-5 text-white/60" />
+                <X className="h-6 w-6 text-white/60" />
               </button>
             </div>
-            <p className="text-sm text-white/80">{pending.texto}</p>
-            <div className="mt-5 flex gap-2">
+            <p className="text-[15px] leading-relaxed text-white/85">{pending.texto}</p>
+            <div className="mt-5 flex gap-3">
               <button
                 onClick={() => setPending(null)}
-                className="flex-1 rounded-lg bg-white/10 py-2 text-sm hover:bg-white/20"
+                className="flex-1 rounded-xl bg-white/10 py-3 text-[15px] font-medium hover:bg-white/20"
               >
                 Cancelar
               </button>
               <button
                 onClick={confirmPending}
-                className="flex-1 rounded-lg bg-sky-600 py-2 text-sm hover:bg-sky-500"
+                className="flex-1 rounded-xl bg-sky-600 py-3 text-[15px] font-medium hover:bg-sky-500"
               >
                 Enviar
               </button>

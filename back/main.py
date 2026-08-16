@@ -1,10 +1,11 @@
 import os
 import json
+import secrets
 from pathlib import Path
 from typing import List, Optional
 
 from dotenv import load_dotenv
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from openai import OpenAI
 from pydantic import BaseModel
@@ -16,7 +17,19 @@ DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
 DEEPSEEK_BASE_URL = os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
 DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
+COMPA_PASSWORD = os.environ.get("COMPA_PASSWORD", "")
+
+SESSION_TOKENS: set[str] = set()
+
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
+
+
+def require_auth(authorization: Optional[str] = Header(default=None)):
+    if not COMPA_PASSWORD:
+        return
+    token = (authorization or "").removeprefix("Bearer ").strip()
+    if token not in SESSION_TOKENS:
+        raise HTTPException(status_code=401, detail="No autorizado")
 
 SYSTEM_PROMPT = """Sos "Compa", un asistente personal de voz que vive en un celular kiosko. La palabra para activarte es "eh compa". Respondé siempre en español rioplatense, breve y natural.
 
@@ -67,13 +80,28 @@ class ChatRequest(BaseModel):
     messages: List[Message]
 
 
+class LoginRequest(BaseModel):
+    password: str
+
+
 @app.get("/health")
 def health():
-    return {"status": "ok", "model": DEEPSEEK_MODEL}
+    return {"status": "ok", "model": DEEPSEEK_MODEL, "auth": bool(COMPA_PASSWORD)}
+
+
+@app.post("/login")
+def login(req: LoginRequest):
+    if not COMPA_PASSWORD:
+        return {"ok": True, "token": ""}
+    if req.password != COMPA_PASSWORD:
+        raise HTTPException(status_code=401, detail="Contraseña incorrecta")
+    token = secrets.token_hex(32)
+    SESSION_TOKENS.add(token)
+    return {"ok": True, "token": token}
 
 
 @app.get("/youtube/search")
-def youtube_search(q: str):
+def youtube_search(q: str, _: None = Depends(require_auth)):
     import yt_dlp
 
     opts = {
@@ -98,7 +126,7 @@ def youtube_search(q: str):
 
 
 @app.post("/chat")
-def chat(req: ChatRequest):
+def chat(req: ChatRequest, _: None = Depends(require_auth)):
     if not DEEPSEEK_API_KEY:
         return {
             "texto": "No tengo configurada la clave de DeepSeek. Configurá DEEPSEEK_API_KEY.",

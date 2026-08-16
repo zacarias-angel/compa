@@ -19,11 +19,14 @@ agente/
 
 ## Configuración
 
-Copiá `.env.example` a `.env` y poné tu clave de DeepSeek:
+Copiá `.env.example` a `.env` y completá:
 
 ```
 DEEPSEEK_API_KEY=sk-...
+COMPA_PASSWORD=tu-clave-secreta
 ```
+
+`COMPA_PASSWORD` es la contraseña para entrar al kiosko (login). Si la dejás vacía, no pide contraseña.
 
 ## Desarrollo local
 
@@ -49,7 +52,7 @@ npm run dev
 
 1. En Coolify creá un **Project** → **New Resource** → **Docker Compose**
 2. Apuntá al repo de Git que contiene `agente/`
-3. En las variables de entorno agregá `DEEPSEEK_API_KEY`
+3. En las variables de entorno agregá `DEEPSEEK_API_KEY` y `COMPA_PASSWORD`
 4. Deploy
 
 El frontend queda expuesto en el puerto **3000** del host (no 80, porque Traefik lo usa).
