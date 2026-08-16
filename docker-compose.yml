@@ -1,0 +1,28 @@
+services:
+  back:
+    build: ./back
+    container_name: ari-back
+    environment:
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
+      - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
+    networks:
+      - ari
+    restart: unless-stopped
+
+  front:
+    build: ./front
+    container_name: ari-front
+    environment:
+      - BACKEND_HOST=back
+    networks:
+      - ari
+    ports:
+      - "80:80"
+    depends_on:
+      - back
+    restart: unless-stopped
+
+networks:
+  ari:
+    driver: bridge
