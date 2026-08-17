@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bot, LogOut, Maximize, Mic, MicOff, Minimize, Send, Volume2, VolumeX, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
 import { getToken, getWaQr, getWaStatus, login, requestPairingCode, resolveYoutube, sendChat, sendWhatsApp, setToken } from './api'
-import { isSpeechSupported, isTtsSupported, listenOnce, speak, startWakeWord, stopListening, stopSpeaking } from './voice'
+import { isSpeechSupported, isTtsSupported, listenForCommand, speak, startWakeWord, stopListening, stopSpeaking } from './voice'
 
 interface Pending {
   texto: string
@@ -50,7 +50,6 @@ export default function App() {
   const [waConnected, setWaConnected] = useState(true)
   const [waQr, setWaQr] = useState<string | null>(null)
   const [showQr, setShowQr] = useState(false)
-  const [waPhone, setWaPhone] = useState('')
   const [waCode, setWaCode] = useState<string | null>(null)
   const [waPairError, setWaPairError] = useState('')
   const [voiceOn, setVoiceOn] = useState(() => isSpeechSupported())
@@ -171,9 +170,9 @@ export default function App() {
 
   function listenForCommand() {
     stopListening()
-    listenOnce(
+    listenForCommand(
       (text) => {
-        if (text) {
+        if (text && text.trim()) {
           handleSend(text).finally(() => {
             if (voiceOn) startListeningForWake()
           })
@@ -214,7 +213,7 @@ export default function App() {
   async function handlePairingCode() {
     setWaPairError('')
     setWaCode(null)
-    const res = await requestPairingCode(waPhone)
+    const res = await requestPairingCode('')
     if (res.ok && res.code) {
       setWaCode(res.code)
     } else if (res.connected) {
@@ -439,24 +438,16 @@ export default function App() {
             {!waConnected && (
               <div className="space-y-2">
                 <p className="text-xs text-white/60">
-                  Vinculación por código (sin escanear): poné tu número con código de país y te doy
-                  un código de 8 dígitos. Después en WhatsApp: Ajustes → Dispositivos vinculados →
-                  Vincular con número de teléfono.
+                  Vinculación por código (sin escanear): tocá "Obtener código" y te muestro un código
+                  de 8 dígitos. Después en WhatsApp: Ajustes → Dispositivos vinculados → Vincular con
+                  número de teléfono.
                 </p>
-                <div className="flex gap-2">
-                  <input
-                    value={waPhone}
-                    onChange={(e) => setWaPhone(e.target.value)}
-                    placeholder="+54 11 3614 0214"
-                    className="flex-1 rounded-lg bg-white/10 px-3 py-2 text-sm text-white outline-none placeholder:text-white/40"
-                  />
-                  <button
-                    onClick={handlePairingCode}
-                    className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500"
-                  >
-                    Código
-                  </button>
-                </div>
+                <button
+                  onClick={handlePairingCode}
+                  className="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500"
+                >
+                  Obtener código
+                </button>
                 {waPairError && <p className="text-sm text-red-400">{waPairError}</p>}
                 {waCode && (
                   <p className="rounded-lg bg-emerald-900/50 px-3 py-2 text-center text-2xl font-bold tracking-widest text-emerald-300">

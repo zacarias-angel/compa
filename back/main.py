@@ -21,6 +21,7 @@ DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 COMPA_PASSWORD = os.environ.get("COMPA_PASSWORD", "")
 
 WA_URL = os.environ.get("WA_URL", "http://wa:3001")
+WA_PHONE = os.environ.get("WA_PHONE", "")
 
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
@@ -303,8 +304,11 @@ def wa_qr(_: None = Depends(require_auth)):
 
 @app.post("/wa/pairing-code")
 def wa_pairing_code(req: dict, _: None = Depends(require_auth)):
+    phone = req.get("phone", "") or WA_PHONE
+    if not phone:
+        return {"ok": False, "error": "No hay número configurado. Poné WA_PHONE en el entorno."}
     try:
-        r = requests.post(f"{WA_URL}/pairing-code", json={"phone": req.get("phone", "")}, timeout=30)
+        r = requests.post(f"{WA_URL}/pairing-code", json={"phone": phone}, timeout=30)
         return r.json()
     except Exception as e:
         return {"ok": False, "error": str(e)}

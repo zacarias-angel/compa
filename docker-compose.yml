@@ -8,6 +8,7 @@ services:
       - DEEPSEEK_MODEL=${DEEPSEEK_MODEL:-deepseek-chat}
       - COMPA_PASSWORD=${COMPA_PASSWORD:-}
       - WA_URL=http://wa:3001
+      - WA_PHONE=${WA_PHONE:-}
     networks:
       - compa
     depends_on:

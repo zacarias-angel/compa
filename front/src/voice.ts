@@ -37,7 +37,7 @@ export function stopListening() {
 export function startWakeWord(onWake: () => void, onError?: (msg: string) => void) {
   const r = getRecognition()
   if (!r) {
-    onError?.('Este navegador no soporta reconocimiento de voz')
+    onError?.('no-soportado')
     return
   }
   stopRecognition()
@@ -60,7 +60,7 @@ export function startWakeWord(onWake: () => void, onError?: (msg: string) => voi
   }
 
   r.onerror = (e: any) => {
-    console.log('recognition error:', e?.error)
+    console.log('wake error:', e?.error)
     if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
       onError?.('microfono-bloqueado')
       return
@@ -83,7 +83,9 @@ export function startWakeWord(onWake: () => void, onError?: (msg: string) => voi
   }
 }
 
-export function listenOnce(
+const SILENCE_MS = 1600
+
+export function listenForCommand(
   onResult: (text: string) => void,
   onEnd: () => void,
   onError?: (msg: string) => void,
@@ -97,35 +99,56 @@ export function listenOnce(
   mode = 'command'
   recognition = r
   r.lang = 'es-AR'
-  r.continuous = false
-  r.interimResults = false
+  r.continuous = true
+  r.interimResults = true
   r.maxAlternatives = 1
 
+  let finalText = ''
+  let silenceTimer: any = null
   let done = false
-  r.onresult = (e: any) => {
-    const text = e.results[0][0].transcript
-    if (!done) {
-      done = true
-      onResult(text)
-    }
+
+  const finish = (text: string) => {
+    if (done) return
+    done = true
+    clearTimeout(silenceTimer)
+    onResult(text)
   }
+
+  const restartSilence = () => {
+    clearTimeout(silenceTimer)
+    silenceTimer = setTimeout(() => finish(finalText), SILENCE_MS)
+  }
+
+  r.onresult = (e: any) => {
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) {
+        finalText += e.results[i][0].transcript + ' '
+      }
+    }
+    restartSilence()
+  }
+
   r.onerror = (e: any) => {
+    console.log('command error:', e?.error)
     if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
       onError?.('microfono-bloqueado')
+      finish(finalText)
+      return
     }
-    if (!done) {
-      done = true
-      onEnd()
+    if (e?.error === 'no-speech') {
+      restartSilence()
     }
   }
+
   r.onend = () => {
     if (!done) {
-      done = true
-      onEnd()
+      finish(finalText)
     }
   }
+
   try {
     r.start()
+    restartSilence()
   } catch {
     if (!done) {
       done = true
