@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, LogOut, Maximize, Minimize, Send, X } from 'lucide-react'
+import { Bot, LogOut, Maximize, Mic, MicOff, Minimize, Send, Volume2, VolumeX, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
 import { getToken, getWaQr, getWaStatus, login, requestPairingCode, resolveYoutube, sendChat, sendWhatsApp, setToken } from './api'
+import { isSpeechSupported, isTtsSupported, listenOnce, speak, stopSpeaking } from './voice'
 
 interface Pending {
   texto: string
@@ -52,6 +53,9 @@ export default function App() {
   const [waPhone, setWaPhone] = useState('')
   const [waCode, setWaCode] = useState<string | null>(null)
   const [waPairError, setWaPairError] = useState('')
+  const [listening, setListening] = useState(false)
+  const [voiceOn, setVoiceOn] = useState(() => isSpeechSupported())
+  const [ttsOn, setTtsOn] = useState(() => isTtsSupported())
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -125,6 +129,7 @@ export default function App() {
       const res: ChatResponse = await sendChat(next)
       const assistant: ChatMessage = { role: 'assistant', content: res.texto }
       setMessages((prev) => [...prev, assistant])
+      if (ttsOn) speak(res.texto)
       const skip = ['luz_on', 'luz_off', 'musica_on', 'musica_off']
       if (res.accion && !skip.includes(res.accion.tipo)) {
         if (res.requiere_confirmacion) {
@@ -143,6 +148,20 @@ export default function App() {
     } finally {
       setLoading(false)
     }
+  }
+
+  function startListening() {
+    if (listening) return
+    setListening(true)
+    listenOnce(
+      (text) => {
+        setListening(false)
+        if (text) handleSend(text)
+      },
+      () => {
+        setListening(false)
+      },
+    )
   }
 
   async function handlePairingCode() {
@@ -265,11 +284,28 @@ export default function App() {
       </main>
 
       <footer className="flex items-center gap-2 border-t border-white/10 px-3 py-3">
+        <button
+          onClick={startListening}
+          disabled={!voiceOn}
+          className={`rounded-full p-3 text-white transition ${
+            listening ? 'bg-red-500' : 'bg-white/10 hover:bg-white/20'
+          } disabled:opacity-40`}
+          aria-label="Hablar"
+        >
+          <Mic className="h-5 w-5" />
+        </button>
+        <button
+          onClick={() => setTtsOn((v) => !v)}
+          className="rounded-full p-3 text-white/70 transition hover:bg-white/10"
+          aria-label="Voz de respuesta"
+        >
+          {ttsOn ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+        </button>
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder="Escribí acá..."
+          placeholder={listening ? 'Escuchando...' : 'Escribí o hablá...'}
           className="flex-1 rounded-full bg-white/10 px-4 py-3 text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button
