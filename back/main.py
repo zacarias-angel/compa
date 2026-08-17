@@ -301,6 +301,15 @@ def wa_qr(_: None = Depends(require_auth)):
         return {"connected": False, "qr": None, "error": str(e)}
 
 
+@app.post("/wa/pairing-code")
+def wa_pairing_code(req: dict, _: None = Depends(require_auth)):
+    try:
+        r = requests.post(f"{WA_URL}/pairing-code", json={"phone": req.get("phone", "")}, timeout=30)
+        return r.json()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
 @app.post("/chat")
 def chat(req: ChatRequest, _: None = Depends(require_auth)):
     if not DEEPSEEK_API_KEY:

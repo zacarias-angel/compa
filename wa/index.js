@@ -4,6 +4,7 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   Browsers,
+  PHONENUMBER_MCC,
 } from '@whiskeysockets/baileys'
 import pino from 'pino'
 import { toDataURL } from 'qrcode'
@@ -20,6 +21,7 @@ let sock = null
 let qrCode = null
 let connected = false
 let contacts = {}
+let pairingCode = null
 
 const CONTACTS_FILE = `${AUTH_DIR}/contacts.json`
 
@@ -121,6 +123,22 @@ app.get('/qr', async (req, res) => {
   if (!qrCode) return res.json({ connected: false, qr: null })
   const dataUrl = await toDataURL(qrCode)
   res.json({ connected: false, qr: dataUrl })
+})
+
+app.post('/pairing-code', async (req, res) => {
+  if (connected) return res.json({ ok: true, connected: true, code: null })
+  const phone = (req.body?.phone || '').replace(/[^0-9]/g, '')
+  if (!phone) {
+    return res.status(400).json({ ok: false, error: 'Falta el número de teléfono' })
+  }
+  if (!sock) return res.status(503).json({ ok: false, error: 'Socket no listo, esperá unos segundos' })
+  try {
+    const code = await sock.requestPairingCode(phone)
+    pairingCode = code
+    return res.json({ ok: true, code })
+  } catch (e) {
+    return res.json({ ok: false, error: String(e) })
+  }
 })
 
 app.get('/status', (req, res) => {

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Bot, LogOut, Maximize, Minimize, MessageCircle, Send, X } from 'lucide-react'
+import { Bot, LogOut, Maximize, Minimize, Send, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
-import { getToken, getWaQr, getWaStatus, login, resolveYoutube, sendChat, sendWhatsApp, setToken } from './api'
+import { getToken, getWaQr, getWaStatus, login, requestPairingCode, resolveYoutube, sendChat, sendWhatsApp, setToken } from './api'
 
 interface Pending {
   texto: string
@@ -49,6 +49,9 @@ export default function App() {
   const [waConnected, setWaConnected] = useState(true)
   const [waQr, setWaQr] = useState<string | null>(null)
   const [showQr, setShowQr] = useState(false)
+  const [waPhone, setWaPhone] = useState('')
+  const [waCode, setWaCode] = useState<string | null>(null)
+  const [waPairError, setWaPairError] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -139,6 +142,19 @@ export default function App() {
       }
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function handlePairingCode() {
+    setWaPairError('')
+    setWaCode(null)
+    const res = await requestPairingCode(waPhone)
+    if (res.ok && res.code) {
+      setWaCode(res.code)
+    } else if (res.connected) {
+      setWaConnected(true)
+    } else {
+      setWaPairError(res.error || 'No pude generar el código')
     }
   }
 
@@ -306,16 +322,50 @@ export default function App() {
             ) : waQr ? (
               <>
                 <p className="mb-3 text-sm text-white/70">
-                  Abrí WhatsApp en tu celular → Ajustes → Dispositivos vinculados → Vincular un
-                  dispositivo, y escaneá este código.
+                  Escaneá el QR desde OTRO teléfono (WhatsApp → Ajustes → Dispositivos vinculados →
+                  Vincular dispositivo).
                 </p>
-                <img src={waQr} alt="QR WhatsApp" className="mx-auto w-full max-w-[260px] rounded-xl bg-white p-2" />
+                <img src={waQr} alt="QR WhatsApp" className="mx-auto w-full max-w-[240px] rounded-xl bg-white p-2" />
+                <div className="my-4 flex items-center gap-3">
+                  <div className="h-px flex-1 bg-white/20" />
+                  <span className="text-xs text-white/50">o usá código</span>
+                  <div className="h-px flex-1 bg-white/20" />
+                </div>
               </>
             ) : (
               <p className="text-[15px] text-white/70">
-                Generando código... esperá unos segundos. Si no aparece, el servicio de WhatsApp
-                todavía está arrancando.
+                Generando QR... si no aparece, usá el código de vinculación de abajo.
               </p>
+            )}
+
+            {!waConnected && (
+              <div className="space-y-2">
+                <p className="text-xs text-white/60">
+                  Vinculación por código (sin escanear): poné tu número con código de país y te doy
+                  un código de 8 dígitos. Después en WhatsApp: Ajustes → Dispositivos vinculados →
+                  Vincular con número de teléfono.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    value={waPhone}
+                    onChange={(e) => setWaPhone(e.target.value)}
+                    placeholder="+54 11 3614 0214"
+                    className="flex-1 rounded-lg bg-white/10 px-3 py-2 text-sm text-white outline-none placeholder:text-white/40"
+                  />
+                  <button
+                    onClick={handlePairingCode}
+                    className="rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500"
+                  >
+                    Código
+                  </button>
+                </div>
+                {waPairError && <p className="text-sm text-red-400">{waPairError}</p>}
+                {waCode && (
+                  <p className="rounded-lg bg-emerald-900/50 px-3 py-2 text-center text-2xl font-bold tracking-widest text-emerald-300">
+                    {waCode}
+                  </p>
+                )}
+              </div>
             )}
             <div className="mt-5">
               <button

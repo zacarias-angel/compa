@@ -74,3 +74,12 @@ export async function getWaQr(): Promise<{ connected: boolean; qr: string | null
   if (!res.ok) return { connected: false, qr: null }
   return res.json()
 }
+
+export async function requestPairingCode(phone: string): Promise<{ ok: boolean; code?: string | null; connected?: boolean; error?: string }> {
+  const res = await fetch(`${API_URL}/api/wa/pairing-code`, {
+    method: 'POST',
+    headers: headers(),
+    body: JSON.stringify({ phone }),
+  })
+  return res.json()
+}
