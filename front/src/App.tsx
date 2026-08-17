@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Bot, LogOut, Maximize, Mic, MicOff, Minimize, Send, Volume2, VolumeX, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
 import { getToken, getWaQr, getWaStatus, login, requestPairingCode, resolveYoutube, sendChat, sendWhatsApp, setToken } from './api'
-import { isSpeechSupported, isTtsSupported, listenOnce, speak, stopSpeaking } from './voice'
+import { isSpeechSupported, isTtsSupported, listenOnce, speak, startWakeWord, stopListening, stopSpeaking } from './voice'
 
 interface Pending {
   texto: string
@@ -53,10 +53,15 @@ export default function App() {
   const [waPhone, setWaPhone] = useState('')
   const [waCode, setWaCode] = useState<string | null>(null)
   const [waPairError, setWaPairError] = useState('')
-  const [listening, setListening] = useState(false)
   const [voiceOn, setVoiceOn] = useState(() => isSpeechSupported())
   const [ttsOn, setTtsOn] = useState(() => isTtsSupported())
+  const [awaitingWake, setAwaitingWake] = useState(true)
   const bottomRef = useRef<HTMLDivElement>(null)
+
+  const messagesRef = useRef(messages)
+  messagesRef.current = messages
+  const ttsRef = useRef(ttsOn)
+  ttsRef.current = ttsOn
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -101,6 +106,18 @@ export default function App() {
     }
   }, [kiosk])
 
+  useEffect(() => {
+    if (!authed || !voiceOn) {
+      stopListening()
+      return
+    }
+    startListeningForWake()
+    return () => {
+      stopListening()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, voiceOn])
+
   async function handleLogin() {
     setLoginError(false)
     const ok = await login(password)
@@ -115,21 +132,22 @@ export default function App() {
     const result = await executeAction(accion)
     if (result) {
       setMessages((prev) => [...prev, { role: 'assistant', content: result }])
+      if (ttsRef.current) speak(result)
     }
   }
 
-  async function handleSend(text?: string) {
+  async function handleSend(text?: string): Promise<void> {
     const content = (text ?? input).trim()
     if (!content || loading) return
     setInput('')
-    const next: ChatMessage[] = [...messages, { role: 'user', content }]
+    const next: ChatMessage[] = [...messagesRef.current, { role: 'user', content }]
     setMessages(next)
     setLoading(true)
     try {
       const res: ChatResponse = await sendChat(next)
       const assistant: ChatMessage = { role: 'assistant', content: res.texto }
       setMessages((prev) => [...prev, assistant])
-      if (ttsOn) speak(res.texto)
+      if (ttsRef.current) speak(res.texto)
       const skip = ['luz_on', 'luz_off', 'musica_on', 'musica_off']
       if (res.accion && !skip.includes(res.accion.tipo)) {
         if (res.requiere_confirmacion) {
@@ -150,18 +168,34 @@ export default function App() {
     }
   }
 
-  function startListening() {
-    if (listening) return
-    setListening(true)
+  function listenForCommand() {
+    stopListening()
     listenOnce(
       (text) => {
-        setListening(false)
-        if (text) handleSend(text)
+        if (text) {
+          handleSend(text).finally(() => {
+            if (voiceOn) startListeningForWake()
+          })
+        } else {
+          startListeningForWake()
+        }
       },
       () => {
-        setListening(false)
+        startListeningForWake()
       },
     )
+  }
+
+  function startListeningForWake() {
+    if (!voiceOn) return
+    setAwaitingWake(true)
+    startWakeWord(() => {
+      setAwaitingWake(false)
+      stopListening()
+      speak('decime', () => {
+        listenForCommand()
+      })
+    })
   }
 
   async function handlePairingCode() {
@@ -220,7 +254,9 @@ export default function App() {
         </div>
         <div>
           <div className="font-semibold leading-tight text-white">Compa</div>
-          <div className="text-xs text-emerald-400">en línea</div>
+          <div className={`text-xs ${awaitingWake && voiceOn ? 'text-sky-400' : 'text-emerald-400'}`}>
+            {voiceOn ? (awaitingWake ? 'escuchando "eh compa"...' : 'escuchando') : 'en línea'}
+          </div>
         </div>
         <button
           onClick={() => setShowQr(true)}
@@ -285,14 +321,13 @@ export default function App() {
 
       <footer className="flex items-center gap-2 border-t border-white/10 px-3 py-3">
         <button
-          onClick={startListening}
-          disabled={!voiceOn}
-          className={`rounded-full p-3 text-white transition ${
-            listening ? 'bg-red-500' : 'bg-white/10 hover:bg-white/20'
-          } disabled:opacity-40`}
-          aria-label="Hablar"
+          onClick={() => setVoiceOn((v) => !v)}
+          className={`rounded-full p-3 transition ${
+            awaitingWake ? 'bg-sky-600 text-white' : 'bg-white/10 text-white/70 hover:bg-white/20'
+          }`}
+          aria-label="Activar/desactivar voz"
         >
-          <Mic className="h-5 w-5" />
+          {voiceOn ? <Mic className="h-5 w-5" /> : <MicOff className="h-5 w-5" />}
         </button>
         <button
           onClick={() => setTtsOn((v) => !v)}
@@ -305,7 +340,7 @@ export default function App() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-          placeholder={listening ? 'Escuchando...' : 'Escribí o hablá...'}
+          placeholder={awaitingWake ? 'Decí "eh compa"...' : 'Escuchando...'}
           className="flex-1 rounded-full bg-white/10 px-4 py-3 text-[15px] text-white outline-none placeholder:text-white/40"
         />
         <button

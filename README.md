@@ -104,8 +104,9 @@ El envío se hace en segundo plano desde el VPS con un servicio propio (baileys)
 
 El kiosko tiene voz integrada con la Web Speech API del navegador (no carga el VPS):
 
-- **Micrófono** (botón rojo al hablar): dictás y Compa responde
-- **Parlante** (ícono de volumen): activa/desactiva la voz de respuesta (TTS)
+- **Escucha continua**: al entrar, queda esperando la palabra **"eh compa"**. Al detectarla dice "decime" y escucha tu comando.
+- **Micrófono** (botón azul): activa/desactiva la escucha continua.
+- **Parlante** (ícono de volumen): activa/desactiva la voz de respuesta (TTS).
 
 Nota: el reconocimiento de voz requiere Chrome/WebView con acceso a internet y permiso de micrófono. El TTS usa la voz en español del dispositivo.
 

@@ -1,16 +1,11 @@
 let recognition: any = null
-let speaking = false
+let mode: 'idle' | 'wake' | 'command' = 'idle'
 
 function getRecognition() {
   const w = window as any
   const SR = w.SpeechRecognition || w.webkitSpeechRecognition
   if (!SR) return null
-  const r = new SR()
-  r.lang = 'es-AR'
-  r.continuous = false
-  r.interimResults = false
-  r.maxAlternatives = 1
-  return r
+  return new SR()
 }
 
 export function isSpeechSupported(): boolean {
@@ -22,12 +17,78 @@ export function isTtsSupported(): boolean {
   return 'speechSynthesis' in window
 }
 
-export function listenOnce(onResult: (text: string) => void, onEnd: () => void): boolean {
+function stopRecognition() {
+  if (recognition) {
+    try {
+      recognition.onresult = null
+      recognition.onerror = null
+      recognition.onend = null
+      recognition.stop()
+    } catch {}
+    recognition = null
+  }
+}
+
+export function stopListening() {
+  mode = 'idle'
+  stopRecognition()
+}
+
+export function startWakeWord(onWake: () => void) {
+  const r = getRecognition()
+  if (!r) return
+  stopRecognition()
+  mode = 'wake'
+  recognition = r
+  r.lang = 'es-AR'
+  r.continuous = true
+  r.interimResults = true
+  r.maxAlternatives = 1
+
+  r.onresult = (e: any) => {
+    let text = ''
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      text += e.results[i][0].transcript + ' '
+    }
+    const t = text.toLowerCase()
+    if (/(compa|acompá|acompa|compañero)/.test(t)) {
+      onWake()
+    }
+  }
+
+  r.onerror = () => {
+    if (mode === 'wake') {
+      setTimeout(() => startWakeWord(onWake), 1000)
+    }
+  }
+
+  r.onend = () => {
+    if (mode === 'wake') {
+      setTimeout(() => startWakeWord(onWake), 300)
+    }
+  }
+
+  try {
+    r.start()
+  } catch {
+    if (mode === 'wake') setTimeout(() => startWakeWord(onWake), 1000)
+  }
+}
+
+export function listenOnce(onResult: (text: string) => void, onEnd: () => void) {
   const r = getRecognition()
   if (!r) {
     onEnd()
-    return false
+    return
   }
+  stopRecognition()
+  mode = 'command'
+  recognition = r
+  r.lang = 'es-AR'
+  r.continuous = false
+  r.interimResults = false
+  r.maxAlternatives = 1
+
   let done = false
   r.onresult = (e: any) => {
     const text = e.results[0][0].transcript
@@ -50,15 +111,19 @@ export function listenOnce(onResult: (text: string) => void, onEnd: () => void):
   }
   try {
     r.start()
-    return true
   } catch {
-    onEnd()
-    return false
+    if (!done) {
+      done = true
+      onEnd()
+    }
   }
 }
 
-export function speak(text: string) {
-  if (!('speechSynthesis' in window) || !text) return
+export function speak(text: string, onEnd?: () => void) {
+  if (!('speechSynthesis' in window) || !text) {
+    onEnd?.()
+    return
+  }
   try {
     window.speechSynthesis.cancel()
   } catch {}
@@ -68,12 +133,9 @@ export function speak(text: string) {
   const voices = window.speechSynthesis.getVoices()
   const es = voices.find((v) => v.lang?.toLowerCase().startsWith('es'))
   if (es) u.voice = es
-  speaking = true
-  u.onend = () => {
-    speaking = false
-  }
-  u.onerror = () => {
-    speaking = false
+  if (onEnd) {
+    u.onend = onEnd
+    u.onerror = onEnd
   }
   window.speechSynthesis.speak(u)
 }
@@ -82,9 +144,4 @@ export function stopSpeaking() {
   try {
     window.speechSynthesis.cancel()
   } catch {}
-  speaking = false
-}
-
-export function isSpeaking(): boolean {
-  return speaking
 }
