@@ -42,8 +42,9 @@ SYSTEM_PROMPT = """Sos "Compa", un asistente personal de voz que vive en un celu
 Tenés acceso a herramientas para obtener información actual de internet:
 - get_weather: clima actual de una ciudad
 - search_web: buscar información actual (noticias, estado de servicios, datos de hoy, cotizaciones, etc.)
+- list_contacts: obtener la lista de contactos de WhatsApp disponibles
 
-Usá esas herramientas cuando el usuario pregunte algo que necesite datos actuales de internet (clima, noticias, cotizaciones, estado de trenes/servicios, etc.). Para preguntas de conocimiento general que ya sabés, respondé directo.
+Usá esas herramientas cuando el usuario pregunte algo que necesite datos actuales de internet (clima, noticias, cotizaciones, estado de trenes/servicios, etc.). Para preguntas de conocimiento general que ya sabés, respondé directo. Si el usuario pide ver la lista de contactos, usá la herramienta list_contacts.
 
 Además, interpretá acciones que pide el usuario. Devolvé SIEMPRE (como respuesta final, sin tool calls) un JSON válido con esta estructura:
 
@@ -99,6 +100,17 @@ TOOLS = [
                     "consulta": {"type": "string", "description": "La consulta a buscar"}
                 },
                 "required": ["consulta"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_contacts",
+            "description": "Obtener la lista de contactos de WhatsApp disponibles",
+            "parameters": {
+                "type": "object",
+                "properties": {},
             },
         },
     },
@@ -196,11 +208,25 @@ def search_web(consulta: str) -> str:
         return f"No pude buscar '{consulta}' en este momento."
 
 
+def list_contacts() -> str:
+    try:
+        r = requests.get(f"{WA_URL}/contacts", timeout=5)
+        data = r.json()
+        names = data.get("names", [])
+        if not names:
+            return "No hay contactos sincronizados todavía."
+        return "Contactos disponibles: " + ", ".join(names)
+    except Exception:
+        return "No pude obtener los contactos."
+
+
 def run_tool(name: str, args: dict) -> str:
     if name == "get_weather":
         return get_weather(args.get("ciudad", ""))
     if name == "search_web":
         return search_web(args.get("consulta", ""))
+    if name == "list_contacts":
+        return list_contacts()
     return ""
 
 

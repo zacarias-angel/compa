@@ -51,7 +51,19 @@ function registerContacts(list) {
     const name = c.notify || c.name || c.verifiedName
     const jid = c.id
     if (name && jid && jid.endsWith('@s.whatsapp.net')) {
-      contacts[normalize(name)] = jid
+      contacts[normalize(name)] = { name, jid }
+    }
+  }
+  saveContacts()
+}
+
+function registerChats(list) {
+  for (const chat of list) {
+    const c = chat.contact || chat
+    const name = c.notify || c.name || c.verifiedName
+    const jid = c.id || chat.id
+    if (name && jid && jid.endsWith('@s.whatsapp.net')) {
+      contacts[normalize(name)] = { name, jid }
     }
   }
   saveContacts()
@@ -59,9 +71,9 @@ function registerContacts(list) {
 
 function findJid(nombre) {
   const key = normalize(nombre)
-  if (contacts[key]) return contacts[key]
+  if (contacts[key]) return contacts[key].jid
   for (const [k, v] of Object.entries(contacts)) {
-    if (k.includes(key) || key.includes(k)) return v
+    if (k.includes(key) || key.includes(k)) return v.jid
   }
   return null
 }
@@ -76,6 +88,7 @@ async function start() {
     printQRInTerminal: false,
     auth: state,
     browser: Browsers.ubuntu('Chrome'),
+    syncFullHistory: false,
   })
 
   sock.ev.on('connection.update', async (update) => {
@@ -97,12 +110,10 @@ async function start() {
 
   sock.ev.on('contacts.upsert', (u) => registerContacts(u.contacts))
   sock.ev.on('contacts.update', (u) => registerContacts(u))
-
-  if (sock.user) {
-    try {
-      const all = await sock.fetchStatus?.()
-    } catch {}
-  }
+  sock.ev.on('chats.upsert', (u) => registerChats(u))
+  sock.ev.on('messaging-history.set', (u) => {
+    for (const chat of u.chats || []) registerChats([chat])
+  })
 }
 
 app.get('/qr', async (req, res) => {
@@ -134,7 +145,8 @@ app.post('/send', async (req, res) => {
 })
 
 app.get('/contacts', (req, res) => {
-  res.json(contacts)
+  const names = Object.values(contacts).map((c) => c.name)
+  res.json({ names })
 })
 
 app.listen(PORT, () => console.log(`wa-service en :${PORT}`))
