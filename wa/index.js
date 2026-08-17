@@ -4,7 +4,6 @@ import makeWASocket, {
   DisconnectReason,
   fetchLatestBaileysVersion,
   Browsers,
-  PHONENUMBER_MCC,
 } from '@whiskeysockets/baileys'
 import pino from 'pino'
 import { toDataURL } from 'qrcode'
@@ -21,7 +20,6 @@ let sock = null
 let qrCode = null
 let connected = false
 let contacts = {}
-let pairingCode = null
 
 const CONTACTS_FILE = `${AUTH_DIR}/contacts.json`
 
@@ -81,41 +79,53 @@ function findJid(nombre) {
 }
 
 async function start() {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
-  const { version } = await fetchLatestBaileysVersion()
+  try {
+    const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR)
 
-  sock = makeWASocket({
-    version,
-    logger,
-    printQRInTerminal: false,
-    auth: state,
-    browser: Browsers.ubuntu('Chrome'),
-    syncFullHistory: false,
-  })
-
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update
-    if (qr) qrCode = qr
-    if (connection === 'close') {
-      const code = lastDisconnect?.error?.output?.statusCode
-      connected = false
-      if (code !== DisconnectReason.loggedOut) {
-        setTimeout(start, 3000)
-      }
-    } else if (connection === 'open') {
-      connected = true
-      qrCode = null
+    let version
+    try {
+      const v = await fetchLatestBaileysVersion()
+      version = v.version
+    } catch {
+      version = [2, 3000, 1015901307]
     }
-  })
 
-  sock.ev.on('creds.update', saveCreds)
+    sock = makeWASocket({
+      version,
+      logger,
+      printQRInTerminal: false,
+      auth: state,
+      browser: Browsers.ubuntu('Chrome'),
+      syncFullHistory: false,
+    })
 
-  sock.ev.on('contacts.upsert', (u) => registerContacts(u.contacts))
-  sock.ev.on('contacts.update', (u) => registerContacts(u))
-  sock.ev.on('chats.upsert', (u) => registerChats(u))
-  sock.ev.on('messaging-history.set', (u) => {
-    for (const chat of u.chats || []) registerChats([chat])
-  })
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update
+      if (qr) qrCode = qr
+      if (connection === 'close') {
+        const code = lastDisconnect?.error?.output?.statusCode
+        connected = false
+        if (code !== DisconnectReason.loggedOut) {
+          setTimeout(() => start().catch(() => {}), 3000)
+        }
+      } else if (connection === 'open') {
+        connected = true
+        qrCode = null
+      }
+    })
+
+    sock.ev.on('creds.update', saveCreds)
+
+    sock.ev.on('contacts.upsert', (u) => registerContacts(u.contacts))
+    sock.ev.on('contacts.update', (u) => registerContacts(u))
+    sock.ev.on('chats.upsert', (u) => registerChats(u))
+    sock.ev.on('messaging-history.set', (u) => {
+      for (const chat of u.chats || []) registerChats([chat])
+    })
+  } catch (e) {
+    console.error('start error:', e?.message || e)
+    setTimeout(() => start().catch(() => {}), 5000)
+  }
 }
 
 app.get('/qr', async (req, res) => {
@@ -134,7 +144,6 @@ app.post('/pairing-code', async (req, res) => {
   if (!sock) return res.status(503).json({ ok: false, error: 'Socket no listo, esperá unos segundos' })
   try {
     const code = await sock.requestPairingCode(phone)
-    pairingCode = code
     return res.json({ ok: true, code })
   } catch (e) {
     return res.json({ ok: false, error: String(e) })
@@ -168,4 +177,11 @@ app.get('/contacts', (req, res) => {
 })
 
 app.listen(PORT, () => console.log(`wa-service en :${PORT}`))
-start()
+start().catch(() => {})
+
+process.on('unhandledRejection', (e) => {
+  console.error('unhandledRejection:', e?.message || e)
+})
+process.on('uncaughtException', (e) => {
+  console.error('uncaughtException:', e?.message || e)
+})
