@@ -56,6 +56,7 @@ export default function App() {
   const [voiceOn, setVoiceOn] = useState(() => isSpeechSupported())
   const [ttsOn, setTtsOn] = useState(() => isTtsSupported())
   const [awaitingWake, setAwaitingWake] = useState(true)
+  const [micBlocked, setMicBlocked] = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const messagesRef = useRef(messages)
@@ -183,19 +184,31 @@ export default function App() {
       () => {
         startListeningForWake()
       },
+      (msg) => {
+        if (msg === 'microfono-bloqueado') setMicBlocked(true)
+      },
     )
   }
 
   function startListeningForWake() {
     if (!voiceOn) return
     setAwaitingWake(true)
-    startWakeWord(() => {
-      setAwaitingWake(false)
-      stopListening()
-      speak('decime', () => {
-        listenForCommand()
-      })
-    })
+    setMicBlocked(false)
+    startWakeWord(
+      () => {
+        setAwaitingWake(false)
+        stopListening()
+        speak('decime', () => {
+          listenForCommand()
+        })
+      },
+      (msg) => {
+        if (msg === 'microfono-bloqueado') {
+          setMicBlocked(true)
+          setAwaitingWake(false)
+        }
+      },
+    )
   }
 
   async function handlePairingCode() {
@@ -254,8 +267,8 @@ export default function App() {
         </div>
         <div>
           <div className="font-semibold leading-tight text-white">Compa</div>
-          <div className={`text-xs ${awaitingWake && voiceOn ? 'text-sky-400' : 'text-emerald-400'}`}>
-            {voiceOn ? (awaitingWake ? 'escuchando "eh compa"...' : 'escuchando') : 'en línea'}
+          <div className={`text-xs ${awaitingWake && voiceOn && !micBlocked ? 'text-sky-400' : 'text-emerald-400'}`}>
+            {micBlocked ? 'micrófono sin permiso' : voiceOn ? (awaitingWake ? 'escuchando "eh compa"...' : 'escuchando') : 'en línea'}
           </div>
         </div>
         <button
@@ -318,6 +331,20 @@ export default function App() {
         )}
         <div ref={bottomRef} />
       </main>
+
+      {micBlocked && (
+        <div className="flex items-center gap-3 border-t border-amber-500/30 bg-amber-500/10 px-4 py-3">
+          <p className="flex-1 text-sm text-amber-300">
+            Necesito permiso del micrófono para escucharte.
+          </p>
+          <button
+            onClick={() => startListeningForWake()}
+            className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-black hover:bg-amber-400"
+          >
+            Activar
+          </button>
+        </div>
+      )}
 
       <footer className="flex items-center gap-2 border-t border-white/10 px-3 py-3">
         <button

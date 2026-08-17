@@ -34,9 +34,12 @@ export function stopListening() {
   stopRecognition()
 }
 
-export function startWakeWord(onWake: () => void) {
+export function startWakeWord(onWake: () => void, onError?: (msg: string) => void) {
   const r = getRecognition()
-  if (!r) return
+  if (!r) {
+    onError?.('Este navegador no soporta reconocimiento de voz')
+    return
+  }
   stopRecognition()
   mode = 'wake'
   recognition = r
@@ -56,26 +59,35 @@ export function startWakeWord(onWake: () => void) {
     }
   }
 
-  r.onerror = () => {
+  r.onerror = (e: any) => {
+    console.log('recognition error:', e?.error)
+    if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+      onError?.('microfono-bloqueado')
+      return
+    }
     if (mode === 'wake') {
-      setTimeout(() => startWakeWord(onWake), 1000)
+      setTimeout(() => startWakeWord(onWake, onError), 1000)
     }
   }
 
   r.onend = () => {
     if (mode === 'wake') {
-      setTimeout(() => startWakeWord(onWake), 300)
+      setTimeout(() => startWakeWord(onWake, onError), 300)
     }
   }
 
   try {
     r.start()
   } catch {
-    if (mode === 'wake') setTimeout(() => startWakeWord(onWake), 1000)
+    if (mode === 'wake') setTimeout(() => startWakeWord(onWake, onError), 1000)
   }
 }
 
-export function listenOnce(onResult: (text: string) => void, onEnd: () => void) {
+export function listenOnce(
+  onResult: (text: string) => void,
+  onEnd: () => void,
+  onError?: (msg: string) => void,
+) {
   const r = getRecognition()
   if (!r) {
     onEnd()
@@ -97,7 +109,10 @@ export function listenOnce(onResult: (text: string) => void, onEnd: () => void) 
       onResult(text)
     }
   }
-  r.onerror = () => {
+  r.onerror = (e: any) => {
+    if (e?.error === 'not-allowed' || e?.error === 'service-not-allowed') {
+      onError?.('microfono-bloqueado')
+    }
     if (!done) {
       done = true
       onEnd()
