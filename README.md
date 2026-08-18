@@ -1,22 +1,20 @@
-# Compa — Asistente personal
+#  — Asistente personal
 
-Asistente de voz/texto que corre en un VPS (Coolify + Docker) y se usa desde un celular Android como kiosko. Se activa con la palabra "eh compa".
+Asistente de voz/texto que corre en un VPS (Coolify + Docker) y se usa desde un celular Android como kiosko. Se activa con la palabra 
 
 ## Estructura
 
 ```
 agente/
 ├── back/                 # Backend FastAPI + cerebro DeepSeek
-│   ├── main.py           # API /chat, /wa/send, /health
+│   ├── main.py           # API /chat, /device (MQTT), /health
 │   ├── requirements.txt
 │   └── Dockerfile
 ├── front/                # Frontend React/Vite (kiosko chat)
 │   ├── src/
 │   └── Dockerfile
-├── wa/                   # Servicio WhatsApp (baileys)
-│   ├── index.js          # API /send, /status, /qr
-│   └── Dockerfile
-├── docker-compose.yml    # Levanta back + front + wa juntos
+├── mosquitto.conf        # Broker MQTT (para ESP32)
+├── docker-compose.yml    # Levanta back + front + mqtt
 └── .env.example
 ```
 
@@ -27,6 +25,7 @@ Copiá `.env.example` a `.env` y completá:
 ```
 DEEPSEEK_API_KEY=sk-...
 COMPA_PASSWORD=tu-clave-secreta
+MQTT_TOPIC=compa/device
 ```
 
 `COMPA_PASSWORD` es la contraseña para entrar al kiosko (login). Si la dejás vacía, no pide contraseña.
@@ -77,28 +76,34 @@ Si los desplegás separados, editá `front/nginx.conf` y cambiá `http://back:80
 
 ## WhatsApp
 
-El envío se hace en segundo plano desde el VPS con un servicio propio (baileys). Usa los contactos del teléfono vinculado, no una lista manual.
+El envío se hace **sin APIs no oficiales** (cero riesgo de ban):
 
-### Vincular el número (una sola vez)
+1. Compa abre WhatsApp oficial con el mensaje precargado (`wa.me`).
+2. El **ESP32 con un servo** toca físicamente el botón "enviar".
+3. Al confirmar, Compa publica `{"action": "tap"}` en el topic MQTT.
 
-1. Desplegá el stack
-2. En el kiosko, tocá el botón **WA!** del header (aparece ámbar si no está conectado)
-3. Escaneá el QR con WhatsApp del celular (Ajustes → Dispositivos vinculados → Vincular dispositivo)
-4. Listo. La sesión queda guardada en el volumen `wa-data`
+Los contactos se mapean en `front/src/contacts.ts`:
 
-### Enviar mensajes
+```ts
+export const contacts: Record<string, string> = {
+  angel: '+549XXXXXXXXXX',
+}
+```
 
-- "mandale un mensaje a angel" → Compa busca "angel" en los contactos de WhatsApp y envía en segundo plano
-- Requiere confirmación antes de enviar
+## MQTT (ESP32)
 
-## Acciones soportadas (Fase 1)
+- Broker: `mosquitto` (puerto 1883, en la red interna).
+- Topic: `compa/device` (configurable con `MQTT_TOPIC`).
+- El ESP32 se suscribe a ese topic y ejecuta la acción que recibe (ej: `tap`, `luz_on`, `luz_off`).
 
-- **YouTube**: abre el video directo (con `yt-dlp`)
-- **WhatsApp**: envía mensaje en segundo plano (con confirmación)
+## Acciones soportadas
+
+- **YouTube**: reproductor embebido en el kiosko (con `yt-dlp`)
+- **WhatsApp**: abre WhatsApp oficial + servo toca "enviar" (con confirmación)
 - **Email**: abre Gmail con mailto
 - **Clima**: usa Open-Meteo (gratis)
 - **Búsqueda web**: usa DuckDuckGo (gratis)
-- **Luz / Música**: devuelve orden (ESP32 en fase 3)
+- **Luz / Música**: orden vía MQTT al ESP32
 
 ## Voz
 
@@ -116,6 +121,5 @@ En el header hay un botón de maximizar que pone la app en pantalla completa y m
 
 ## Fases futuras
 
-- Fase 2: Voz (STT Whisper + TTS Piper)
-- Fase 3: ESP32 + relé (MQTT)
+- Fase 3: ESP32 + relé + servo (MQTT)
 - Fase 4: Avatar Mixamo (three.js)

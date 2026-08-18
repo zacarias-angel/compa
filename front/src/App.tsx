@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { Bot, LogOut, Maximize, Mic, MicOff, Minimize, Send, Volume2, VolumeX, X } from 'lucide-react'
 import { ChatMessage, ChatResponse, Action } from './types'
-import { getToken, getWaQr, getWaStatus, login, requestPairingCode, resolveYoutube, sendChat, sendWhatsApp, setToken } from './api'
+import { getToken, login, resolveYoutube, sendChat, sendDevice, setToken } from './api'
+import { findContact } from './contacts'
 import { isSpeechSupported, isTtsSupported, listenForCommand, speak, startWakeWord, stopListening, stopSpeaking } from './voice'
 
 interface Pending {
@@ -9,23 +10,34 @@ interface Pending {
   accion: Action
 }
 
-async function executeAction(accion: Action): Promise<string | null> {
+interface VideoInfo {
+  type: 'video'
+  id: string
+  title: string
+}
+
+type ActionResult = string | VideoInfo | null
+
+async function executeAction(accion: Action): Promise<ActionResult> {
   const p = accion.parametros
   switch (accion.tipo) {
     case 'youtube': {
-      const url = await resolveYoutube(p.busqueda || '')
-      window.open(
-        url ?? `https://www.youtube.com/results?search_query=${encodeURIComponent(p.busqueda || '')}`,
-        '_self',
-      )
-      return null
+      const res = await resolveYoutube(p.busqueda || '')
+      if (res.id) {
+        return { type: 'video', id: res.id, title: res.title }
+      }
+      return 'No encontré el video.'
     }
     case 'whatsapp': {
-      const res = await sendWhatsApp(p.contacto || '', p.mensaje || '')
-      if (res.ok) {
-        return `Mensaje enviado a ${p.contacto}.`
+      const num = findContact(p.contacto || '').replace(/\D/g, '')
+      const msg = encodeURIComponent(p.mensaje || '')
+      if (num) {
+        window.open(`https://wa.me/${num}?text=${msg}`, '_self')
+      } else {
+        window.open(`https://wa.me/?text=${msg}`, '_self')
       }
-      return `No pude enviar el mensaje: ${res.error || 'error desconocido'}`
+      await sendDevice('tap')
+      return `Listo, preparé el mensaje para ${p.contacto || 'tu contacto'}.`
     }
     case 'email':
       window.open(
@@ -47,15 +59,11 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [pending, setPending] = useState<Pending | null>(null)
   const [kiosk, setKiosk] = useState(false)
-  const [waConnected, setWaConnected] = useState(true)
-  const [waQr, setWaQr] = useState<string | null>(null)
-  const [showQr, setShowQr] = useState(false)
-  const [waCode, setWaCode] = useState<string | null>(null)
-  const [waPairError, setWaPairError] = useState('')
   const [voiceOn, setVoiceOn] = useState(() => isSpeechSupported())
   const [ttsOn, setTtsOn] = useState(() => isTtsSupported())
   const [awaitingWake, setAwaitingWake] = useState(true)
   const [micBlocked, setMicBlocked] = useState(false)
+  const [player, setPlayer] = useState<VideoInfo | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const messagesRef = useRef(messages)
@@ -66,29 +74,6 @@ export default function App() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading, authed])
-
-  useEffect(() => {
-    if (!authed) return
-    let cancelled = false
-    async function poll() {
-      const status = await getWaStatus()
-      if (cancelled) return
-      setWaConnected(status.connected)
-      if (!status.connected) {
-        const qr = await getWaQr()
-        if (!cancelled) setWaQr(qr.qr)
-      } else {
-        setWaQr(null)
-        setShowQr(false)
-      }
-    }
-    poll()
-    const id = setInterval(poll, 5000)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [authed])
 
   useEffect(() => {
     let lock: any = null
@@ -130,10 +115,13 @@ export default function App() {
 
   async function runAction(accion: Action) {
     const result = await executeAction(accion)
-    if (result) {
-      setMessages((prev) => [...prev, { role: 'assistant', content: result }])
-      if (ttsRef.current) speak(result)
+    if (!result) return
+    if (typeof result === 'object' && 'type' in result && result.type === 'video') {
+      setPlayer(result)
+      return
     }
+    setMessages((prev) => [...prev, { role: 'assistant', content: result }])
+    if (ttsRef.current) speak(result)
   }
 
   async function handleSend(text?: string): Promise<void> {
@@ -210,19 +198,6 @@ export default function App() {
     )
   }
 
-  async function handlePairingCode() {
-    setWaPairError('')
-    setWaCode(null)
-    const res = await requestPairingCode('')
-    if (res.ok && res.code) {
-      setWaCode(res.code)
-    } else if (res.connected) {
-      setWaConnected(true)
-    } else {
-      setWaPairError(res.error || 'No pude generar el código')
-    }
-  }
-
   function confirmPending() {
     if (pending) {
       runAction(pending.accion)
@@ -271,18 +246,8 @@ export default function App() {
           </div>
         </div>
         <button
-          onClick={() => setShowQr(true)}
-          className="ml-auto flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium transition hover:bg-white/10"
-          aria-label="Estado WhatsApp"
-        >
-          <span className={`h-2 w-2 rounded-full ${waConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
-          <span className={waConnected ? 'text-emerald-400' : 'text-amber-400'}>
-            {waConnected ? 'WA' : 'WA!'}
-          </span>
-        </button>
-        <button
           onClick={() => setKiosk((k) => !k)}
-          className="rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
+          className="ml-auto rounded-full p-2 text-white/50 transition hover:bg-white/10 hover:text-white"
           aria-label="Kiosko"
         >
           {kiosk ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
@@ -333,9 +298,7 @@ export default function App() {
 
       {micBlocked && (
         <div className="flex items-center gap-3 border-t border-amber-500/30 bg-amber-500/10 px-4 py-3">
-          <p className="flex-1 text-sm text-amber-300">
-            Necesito permiso del micrófono para escucharte.
-          </p>
+          <p className="flex-1 text-sm text-amber-300">Necesito permiso del micrófono para escucharte.</p>
           <button
             onClick={() => startListeningForWake()}
             className="rounded-lg bg-amber-500 px-3 py-2 text-sm font-medium text-black hover:bg-amber-400"
@@ -405,66 +368,26 @@ export default function App() {
           </div>
         </div>
       )}
-      {showQr && (
-        <div className="fixed inset-0 flex items-center justify-center bg-black/70 px-6">
-          <div className="w-full max-w-sm rounded-2xl bg-zinc-900 p-5 text-white shadow-xl">
-            <div className="mb-3 flex items-center justify-between">
-              <span className="text-lg font-semibold">Vincular WhatsApp</span>
-              <button onClick={() => setShowQr(false)} aria-label="Cerrar">
-                <X className="h-6 w-6 text-white/60" />
-              </button>
-            </div>
-            {waConnected ? (
-              <p className="text-[15px] text-emerald-400">WhatsApp conectado.</p>
-            ) : waQr ? (
-              <>
-                <p className="mb-3 text-sm text-white/70">
-                  Escaneá el QR desde OTRO teléfono (WhatsApp → Ajustes → Dispositivos vinculados →
-                  Vincular dispositivo).
-                </p>
-                <img src={waQr} alt="QR WhatsApp" className="mx-auto w-full max-w-[240px] rounded-xl bg-white p-2" />
-                <div className="my-4 flex items-center gap-3">
-                  <div className="h-px flex-1 bg-white/20" />
-                  <span className="text-xs text-white/50">o usá código</span>
-                  <div className="h-px flex-1 bg-white/20" />
-                </div>
-              </>
-            ) : (
-              <p className="text-[15px] text-white/70">
-                Generando QR... si no aparece, usá el código de vinculación de abajo.
-              </p>
-            )}
 
-            {!waConnected && (
-              <div className="space-y-2">
-                <p className="text-xs text-white/60">
-                  Vinculación por código (sin escanear): tocá "Obtener código" y te muestro un código
-                  de 8 dígitos. Después en WhatsApp: Ajustes → Dispositivos vinculados → Vincular con
-                  número de teléfono.
-                </p>
-                <button
-                  onClick={handlePairingCode}
-                  className="w-full rounded-lg bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500"
-                >
-                  Obtener código
-                </button>
-                {waPairError && <p className="text-sm text-red-400">{waPairError}</p>}
-                {waCode && (
-                  <p className="rounded-lg bg-emerald-900/50 px-3 py-2 text-center text-2xl font-bold tracking-widest text-emerald-300">
-                    {waCode}
-                  </p>
-                )}
-              </div>
-            )}
-            <div className="mt-5">
-              <button
-                onClick={() => setShowQr(false)}
-                className="w-full rounded-xl bg-white/10 py-3 text-[15px] font-medium hover:bg-white/20"
-              >
-                Cerrar
-              </button>
-            </div>
+      {player && (
+        <div className="fixed inset-0 z-50 flex flex-col bg-black">
+          <div className="flex items-center gap-3 px-4 py-3">
+            <button
+              onClick={() => setPlayer(null)}
+              className="rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+              aria-label="Cerrar reproductor"
+            >
+              <X className="h-5 w-5" />
+            </button>
+            <span className="flex-1 truncate text-sm text-white/90">{player.title}</span>
           </div>
+          <iframe
+            className="flex-1 w-full"
+            src={`https://www.youtube.com/embed/${player.id}?autoplay=1`}
+            title={player.title}
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
         </div>
       )}
     </div>

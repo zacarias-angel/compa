@@ -44,42 +44,21 @@ export async function sendChat(messages: ChatMessage[]): Promise<ChatResponse> {
   return res.json()
 }
 
-export async function resolveYoutube(query: string): Promise<string | null> {
+export async function resolveYoutube(query: string): Promise<{ id: string | null; url: string | null; title: string }> {
   const res = await fetch(`${API_URL}/api/youtube/search?q=${encodeURIComponent(query)}`, {
     headers: headers(),
   })
-  if (!res.ok) return null
+  if (!res.ok) return { id: null, url: null, title: '' }
   const data = await res.json()
-  return data.url ?? null
+  return { id: data.id ?? null, url: data.url ?? null, title: data.title ?? '' }
 }
 
-export async function sendWhatsApp(contacto: string, mensaje: string): Promise<{ ok: boolean; error?: string }> {
-  const res = await fetch(`${API_URL}/api/wa/send`, {
+export async function sendDevice(action: string): Promise<boolean> {
+  const res = await fetch(`${API_URL}/api/device`, {
     method: 'POST',
     headers: headers(),
-    body: JSON.stringify({ contacto, mensaje }),
+    body: JSON.stringify({ action }),
   })
   const data = await res.json()
-  return { ok: data.ok ?? false, error: data.error }
-}
-
-export async function getWaStatus(): Promise<{ connected: boolean; contactCount?: number }> {
-  const res = await fetch(`${API_URL}/api/wa/status`, { headers: headers() })
-  if (!res.ok) return { connected: false }
-  return res.json()
-}
-
-export async function getWaQr(): Promise<{ connected: boolean; qr: string | null }> {
-  const res = await fetch(`${API_URL}/api/wa/qr`, { headers: headers() })
-  if (!res.ok) return { connected: false, qr: null }
-  return res.json()
-}
-
-export async function requestPairingCode(phone: string): Promise<{ ok: boolean; code?: string | null; connected?: boolean; error?: string }> {
-  const res = await fetch(`${API_URL}/api/wa/pairing-code`, {
-    method: 'POST',
-    headers: headers(),
-    body: JSON.stringify({ phone }),
-  })
-  return res.json()
+  return data.ok ?? false
 }

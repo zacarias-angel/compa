@@ -4,6 +4,7 @@ import hashlib
 from pathlib import Path
 from typing import List, Optional
 
+import paho.mqtt.publish as mqtt_publish
 import requests
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -20,8 +21,9 @@ DEEPSEEK_MODEL = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
 
 COMPA_PASSWORD = os.environ.get("COMPA_PASSWORD", "")
 
-WA_URL = os.environ.get("WA_URL", "http://wa:3001")
-WA_PHONE = os.environ.get("WA_PHONE", "")
+MQTT_BROKER = os.environ.get("MQTT_BROKER", "mqtt")
+MQTT_PORT = int(os.environ.get("MQTT_PORT", "1883"))
+MQTT_TOPIC = os.environ.get("MQTT_TOPIC", "compa/device")
 
 client = OpenAI(api_key=DEEPSEEK_API_KEY, base_url=DEEPSEEK_BASE_URL)
 
@@ -43,9 +45,8 @@ SYSTEM_PROMPT = """Sos "Compa", un asistente personal de voz que vive en un celu
 Tenés acceso a herramientas para obtener información actual de internet:
 - get_weather: clima actual de una ciudad
 - search_web: buscar información actual (noticias, estado de servicios, datos de hoy, cotizaciones, etc.)
-- list_contacts: obtener la lista de contactos de WhatsApp disponibles
 
-Usá esas herramientas cuando el usuario pregunte algo que necesite datos actuales de internet (clima, noticias, cotizaciones, estado de trenes/servicios, etc.). Para preguntas de conocimiento general que ya sabés, respondé directo. Si el usuario pide ver la lista de contactos, usá la herramienta list_contacts.
+Usá esas herramientas cuando el usuario pregunte algo que necesite datos actuales de internet (clima, noticias, cotizaciones, estado de trenes/servicios, etc.). Para preguntas de conocimiento general que ya sabés, respondé directo.
 
 Además, interpretá acciones que pide el usuario. Devolvé SIEMPRE (como respuesta final, sin tool calls) un JSON válido con esta estructura:
 
@@ -104,17 +105,6 @@ TOOLS = [
             },
         },
     },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_contacts",
-            "description": "Obtener la lista de contactos de WhatsApp disponibles",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-            },
-        },
-    },
 ]
 
 app = FastAPI(title="Agente Compa")
@@ -140,9 +130,8 @@ class LoginRequest(BaseModel):
     password: str
 
 
-class WASendRequest(BaseModel):
-    contacto: str
-    mensaje: str
+class DeviceRequest(BaseModel):
+    action: str
 
 
 def get_weather(ciudad: str) -> str:
@@ -209,26 +198,27 @@ def search_web(consulta: str) -> str:
         return f"No pude buscar '{consulta}' en este momento."
 
 
-def list_contacts() -> str:
-    try:
-        r = requests.get(f"{WA_URL}/contacts", timeout=5)
-        data = r.json()
-        names = data.get("names", [])
-        if not names:
-            return "No hay contactos sincronizados todavía."
-        return "Contactos disponibles: " + ", ".join(names)
-    except Exception:
-        return "No pude obtener los contactos."
-
-
 def run_tool(name: str, args: dict) -> str:
     if name == "get_weather":
         return get_weather(args.get("ciudad", ""))
     if name == "search_web":
         return search_web(args.get("consulta", ""))
-    if name == "list_contacts":
-        return list_contacts()
     return ""
+
+
+def publish_device(action: str) -> bool:
+    try:
+        mqtt_publish.single(
+            MQTT_TOPIC,
+            payload=json.dumps({"action": action}),
+            hostname=MQTT_BROKER,
+            port=MQTT_PORT,
+            qos=1,
+        )
+        return True
+    except Exception as e:
+        print("mqtt publish error:", e)
+        return False
 
 
 @app.get("/health")
@@ -262,56 +252,19 @@ def youtube_search(q: str, _: None = Depends(require_auth)):
                 first = entries[0]
                 vid = first.get("id") or first.get("url")
                 return {
+                    "id": vid,
                     "url": f"https://www.youtube.com/watch?v={vid}",
                     "title": first.get("title", ""),
                 }
     except Exception:
         pass
-    return {"url": None, "title": ""}
+    return {"id": None, "url": None, "title": ""}
 
 
-@app.post("/wa/send")
-def wa_send(req: WASendRequest, _: None = Depends(require_auth)):
-    try:
-        r = requests.post(
-            f"{WA_URL}/send",
-            json={"contacto": req.contacto, "mensaje": req.mensaje},
-            timeout=30,
-        )
-        data = r.json()
-        return {"ok": data.get("ok", False), "error": data.get("error", "")}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@app.get("/wa/status")
-def wa_status(_: None = Depends(require_auth)):
-    try:
-        r = requests.get(f"{WA_URL}/status", timeout=5)
-        return r.json()
-    except Exception as e:
-        return {"connected": False, "error": str(e)}
-
-
-@app.get("/wa/qr")
-def wa_qr(_: None = Depends(require_auth)):
-    try:
-        r = requests.get(f"{WA_URL}/qr", timeout=5)
-        return r.json()
-    except Exception as e:
-        return {"connected": False, "qr": None, "error": str(e)}
-
-
-@app.post("/wa/pairing-code")
-def wa_pairing_code(req: dict, _: None = Depends(require_auth)):
-    phone = req.get("phone", "") or WA_PHONE
-    if not phone:
-        return {"ok": False, "error": "No hay número configurado. Poné WA_PHONE en el entorno."}
-    try:
-        r = requests.post(f"{WA_URL}/pairing-code", json={"phone": phone}, timeout=30)
-        return r.json()
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
+@app.post("/device")
+def device(req: DeviceRequest, _: None = Depends(require_auth)):
+    ok = publish_device(req.action)
+    return {"ok": ok}
 
 
 @app.post("/chat")
